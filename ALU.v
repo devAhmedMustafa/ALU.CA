@@ -125,12 +125,210 @@ module mux2to1(
     
 endmodule
 
-module mux12to1(
+module mux4to1(
+    input [1:0] sel,
+    input [3:0] in,
+    output out
+);
+
+    wire mux0_out, mux1_out;
+
+    mux2to1 mux0 (
+        .sel(sel[0]),
+        .in0(in[0]),
+        .in1(in[1]),
+        .out(mux0_out)
+    );
+
+    mux2to1 mux1 (
+        .sel(sel[0]),
+        .in0(in[2]),
+        .in1(in[3]),
+        .out(mux1_out)
+    );
+
+    mux2to1 mux_final (
+        .sel(sel[1]),
+        .in0(mux0_out),
+        .in1(mux1_out),
+        .out(out)
+    );
+    
+endmodule
+
+module mux8to1(
+    input [2:0] sel,
+    input [7:0] in,
+    output out
+);
+
+    wire mux0_out, mux1_out;
+
+    mux4to1 mux0 (
+        .sel(sel[1:0]),
+        .in(in[3:0]),
+        .out(mux0_out)
+    );
+
+    mux4to1 mux1 (
+        .sel(sel[1:0]),
+        .in(in[7:4]),
+        .out(mux1_out)
+    );
+
+    mux2to1 mux_final (
+        .sel(sel[2]),
+        .in0(mux0_out),
+        .in1(mux1_out),
+        .out(out)
+    );
+endmodule
+
+module mux16to1(
     input [3:0] sel,
     input [15:0] in,
     output out
 );
 
-    
-    
+    wire mux0_out, mux1_out;
+
+    mux8to1 mux0 (
+        .sel(sel[2:0]),
+        .in(in[7:0]),
+        .out(mux0_out)
+    );
+
+    mux8to1 mux1 (
+        .sel(sel[2:0]),
+        .in(in[15:8]),
+        .out(mux1_out)
+    );
+
+    mux2to1 mux_final (
+        .sel(sel[3]),
+        .in0(mux0_out),
+        .in1(mux1_out),
+        .out(out)
+    );
+endmodule
+ 
+module ALU_8 (output [7:0] Result, output Zero, Negative, Overflow,
+input [7:0] A, B, input [3:0] AluOp);
+
+    wire [7:0] A_to_FA;
+
+    genvar k;
+    generate
+        for (k = 0; k < 8; k = k + 1) begin : INVERT_A_LOOP
+            mux2to1 MUX_INVERT_A (
+                .sel(AluOp[3]),
+                .in0(A[k]),
+                .in1(~A[k]),
+                .out(A_to_FA[k])
+            );
+        end
+    endgenerate
+
+    wire [7:0] B_to_FA;
+
+    wire [7:0] C = 8'b00000001;
+
+    genvar m;
+    generate
+        for (m = 0; m < 8; m = m + 1) begin : INVERT_B_LOOP
+            mux2to1 MUX_INVERT_B (
+                .sel(AluOp[2]),
+                .in0(B[m]),
+                .in1(C[m]),
+                .out(B_to_FA[m])
+            );
+        end
+    endgenerate
+
+    wire[7:0] Sum;
+    wire Cout;
+
+    bit8_full_adder ADDER (
+        .A(A_to_FA),
+        .B(B_to_FA),
+        .Cin(AluOp[0]),
+        .Sum(Sum),
+        .Cout(Cout)
+    );
+
+    assign Overflow = Cout & (~AluOp[1] & ~AluOp[2] & AluOp[3]);
+
+    wire [7:0] A_B_To_Manipulator;
+
+    mux2to1 MUX_A_B (
+        .sel(AluOp[3]),
+        .in0(A),
+        .in1(B),
+        .out(A_B_To_Manipulator)
+    );
+
+    wire [7:0] Manipulated_Result;
+
+    bit8_manipulator MANIPULATOR (
+        .A(A_B_To_Manipulator),
+        .direction(AluOp[0]),
+        .rotate(AluOp[1]),
+        .Out(Manipulated_Result)
+    );
+
+    wire [7:0] AorB;
+    genvar n;
+    generate
+        for (n = 0; n < 8; n = n + 1) begin : OR_LOOP
+            or (AorB[n], A[n], B[n]);
+        end
+    endgenerate
+
+    wire [7:0] AandB;
+    genvar p;
+    generate
+        for (p = 0; p < 8; p = p + 1) begin : AND_LOOP
+            and (AandB[p], A[p], B[p]);
+        end
+    endgenerate
+
+    wire [7:0] AequalB;
+    genvar r;
+    generate
+        for (r = 0; r < 8; r = r + 1) begin : EQUAL_LOOP
+            xor (AequalB[r], A[r], B[r]);
+            not (AequalB[r], AequalB[r]);
+        end
+    endgenerate
+
+    genvar q;
+    generate
+        for (q = 0; q < 8; q = q + 1) begin : RESULT_MUX_LOOP
+            mux16to1 RESULT_MUX (
+                .sel(AluOp),
+                .in({
+                    Sum[q], 
+                    Sum[q], 
+                    Sum[q], 
+                    1'b0, 
+                    1'b0, 
+                    AequalB[q],
+                    Manipulated_Result[q],
+                    Manipulated_Result[q],
+                    ~A[q],
+                    AandB[q],
+                    AorB[q],
+                    ~AandB[q],
+                    1'b0,
+                    Manipulated_Result[q],
+                    Manipulated_Result[q],
+                    1'b0,
+                    1'b0
+                    }),
+                .out(Result[q])
+            );
+        end
+    endgenerate
+
+
 endmodule
